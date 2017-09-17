@@ -4,6 +4,10 @@
 2. On dpkg systems such as Ubuntu, you can run this command as root
 # apt-get install libgmp-dev libmpfr-dev libmpc-dev libncurses-dev
 
+3. Run the following two commands for the installation of tools and kernel
+# cd {path-to-your-oslight}; ./install-tools.sh
+# cd {path-to-your-oslight}; ./install-os161.sh
+
 3. After the installation of tools and kernel, create a sample sys161.conf configration file
 # cd ${HOME}/os161/root/
 # cp {path-to-your-sys161-2.0.8}/sys161.conf.sample sys161.conf
