@@ -817,7 +817,10 @@ thread_exit(void)
 	thread_checkstack(cur);
 	//--------------------ADDED---------------------
 	if(cur->threadP != NULL){
-	  lock_acquire(cur->
+	  lock_acquire(cur->threadP->lockT);
+	  cur->threadP->threadC = NULL;
+	  cv_signal(cur->threadP->cvT, cur->threadP->lockT);
+	  lock_release(cur->threadP->lockT);
 	}
 	//-------------------------------------------------
 
@@ -835,6 +838,21 @@ thread_yield(void)
 {
 	thread_switch(S_READY, NULL, NULL);
 }
+
+//---------------------ADDED------------------------
+int
+thread_join(void)
+{
+  lock_acquire(curthread->lockT);
+
+  while(curthread->threadC != NULL)
+    cv_wait(curthread->cvT, curthread->lockT);
+
+  lock_release(curthread->lockT);
+
+  return 0;
+}
+//----------------------------------------------
 
 ////////////////////////////////////////////////////////////
 
