@@ -144,3 +144,9 @@ threadtest2(int nargs, char **args)
 
 	return 0;
 }
+
+int
+threadtest4(int nargs, char **args)
+{
+  return 0;
+}
