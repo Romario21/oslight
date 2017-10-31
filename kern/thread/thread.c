@@ -840,7 +840,7 @@ thread_yield(void)
 }
 
 //---------------------ADDED------------------------
-int
+void
 thread_join(void)
 {
   lock_acquire(curthread->lockT);
@@ -850,7 +850,7 @@ thread_join(void)
 
   lock_release(curthread->lockT);
 
-  return 0;
+  //return 0;
 }
 //----------------------------------------------
 

@@ -39,6 +39,9 @@
 #define NTHREADS  8
 
 static struct semaphore *tsem = NULL;
+static struct cv *cvT = NULL;
+static struct lock *lockT = NULL;
+
 
 static
 void
@@ -50,6 +53,53 @@ init_sem(void)
 			panic("threadtest: sem_create failed\n");
 		}
 	}
+}
+
+static
+void
+init_lock(void)
+{
+	if (lockT==NULL) {
+		lockT = lock_create("lockT");
+		if (lockT == NULL) {
+			panic("threadtest: lock_create failed\n");
+		}
+	}
+}
+
+
+
+static
+void
+init_cv(void)
+{
+	if (cvT==NULL) {
+		cvT = cv_create("cvT");
+		if (cvT == NULL) {
+			panic("threadtest: cvT_create failed\n");
+		}
+	}
+}
+
+static
+void
+testing(void *junk, unsigned long num)
+{
+	int ch = num;
+	int i;
+
+	(void)junk;
+
+	kprintf("\nT");
+	kprintf("\nE");
+	kprintf("\nS");
+	kprintf("\nT");
+	kprintf("\nI");
+	kprintf("\nN");
+	kprintf("\nG");
+
+	i +=1;
+	V(tsem);
 }
 
 static
@@ -148,5 +198,28 @@ threadtest2(int nargs, char **args)
 int
 threadtest4(int nargs, char **args)
 {
+  (void)nargs;
+  (void)args;
+  init_cv();
+  init_lock();
+
+  kprintf("Starting thread test 4...\n");
+
+  char name[16];
+  int i = 0, result;
+
+	//	for (i=0; i<NTHREADS; i++) {
+  snprintf(name, sizeof(name), "threadtest%d", i);
+  result = thread_fork(name, NULL, testing, NULL, i);
+  if (result) {
+    panic("threadtest: thread_fork failed %s)\n",
+	  strerror(result));
+  }
+		//	}
+  P(tsem);
+
+  thread_join();
+  kprintf("\nThread test 4 done.\n");
+  
   return 0;
 }

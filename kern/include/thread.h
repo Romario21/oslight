@@ -118,6 +118,8 @@ struct thread {
   struct cv *cvT;
 };
 
+
+
 /*
  * Array of threads.
  */
@@ -154,7 +156,7 @@ int thread_fork(const char *name, struct proc *proc,
                 void (*func)(void *, unsigned long),
                 void *data1, unsigned long data2);
 
-int thread_join(void);
+void thread_join(void);
 
 /*
  * Cause the current thread to exit.
