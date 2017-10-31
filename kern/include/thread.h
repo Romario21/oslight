@@ -109,6 +109,13 @@ struct thread {
 	bool t_did_reserve_buffers;	/* reserve_buffers() in effect */
 
 	/* add more here as needed */
+  //--------------------ADDED------------
+
+  struct thread *threadC;
+  struct thread *threadP;
+  struct lock *lockT;
+  struct wchan *wchanT;
+  struct cv *cvT;
 };
 
 /*

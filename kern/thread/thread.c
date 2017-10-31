@@ -150,6 +150,13 @@ thread_create(const char *name)
 	thread->t_did_reserve_buffers = false;
 
 	/* If you add to struct thread, be sure to initialize here */
+	thread->threadC = NULL;
+	thread->threadP = NULL;
+
+	thread->lockT = NULL;
+	thread->cvT = NULL;
+	thread->wchan = NULL:
+	
 
 	return thread;
 }
@@ -544,6 +551,16 @@ thread_fork(const char *name,
 	/* Set up the switchframe so entrypoint() gets called */
 	switchframe_init(newthread, entrypoint, data1, data2);
 
+	//----------------------------ADDED--------------------
+	curthread->threadC = newthread;
+	newthread->threadP = curthread;
+
+	curthread->lockT = lock_create(name);
+	curthread->wchanT = wchan_create(name);
+	curthread->cv = cv_create(name);
+	//-----------------------------------------------------
+	
+
 	/* Lock the current cpu's run queue and make the new thread runnable */
 	thread_make_runnable(newthread, false);
 
@@ -798,6 +815,11 @@ thread_exit(void)
 
 	/* Check the stack guard band. */
 	thread_checkstack(cur);
+	//--------------------ADDED---------------------
+	if(cur->threadP != NULL){
+	  lock_acquire(cur->
+	}
+	//-------------------------------------------------
 
 	/* Interrupts off on this processor */
         splhigh();
