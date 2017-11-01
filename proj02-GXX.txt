@@ -1,0 +1,952 @@
+diff --git a/defs.mk b/defs.mk
+index 9932652..8b26384 100644
+--- a/defs.mk
++++ b/defs.mk
+@@ -13,7 +13,7 @@
+ # The things that can be set here are documented in mk/os161.config.mk.
+ #
+ 
+-OSTREE=/home/ubuntu/cs161/root
++OSTREE=/home/romario/os161/root
+ PLATFORM=sys161
+ MACHINE=mips
+ COMPAT_CFLAGS= -DNEED_NTOHLL
+diff --git a/kern/include/synch.h b/kern/include/synch.h
+index fee3b07..ed1883d 100644
+--- a/kern/include/synch.h
++++ b/kern/include/synch.h
+@@ -73,7 +73,12 @@ void V(struct semaphore *);
+  * (should be) made internally.
+  */
+ struct lock {
++  //recitation: flag, wait c, spin l, thread pointer?
+         char *lk_name;
++  volatile struct thread *threadL;
++  struct wchan *wchanL;
++  struct spinlock spinL;
++  volatile struct bool boolL;
+         // add what you need here
+         // (don't forget to mark things volatile as needed)
+ };
+@@ -113,6 +118,8 @@ bool lock_do_i_hold(struct lock *);
+ 
+ struct cv {
+         char *cv_name;
++  struct wchan *wchanCV;
++  struct spinlock spinCV;
+         // add what you need here
+         // (don't forget to mark things volatile as needed)
+ };
+diff --git a/kern/include/test.h b/kern/include/test.h
+index ad3552f..3fa904c 100644
+--- a/kern/include/test.h
++++ b/kern/include/test.h
+@@ -54,6 +54,7 @@ int threadlisttest(int, char **);
+ int threadtest(int, char **);
+ int threadtest2(int, char **);
+ int threadtest3(int, char **);
++int threadtest4(int, char **);
+ int semtest(int, char **);
+ int locktest(int, char **);
+ int cvtest(int, char **);
+diff --git a/kern/include/thread.h b/kern/include/thread.h
+index d161c8f..d3280e6 100644
+--- a/kern/include/thread.h
++++ b/kern/include/thread.h
+@@ -109,8 +109,17 @@ struct thread {
+ 	bool t_did_reserve_buffers;	/* reserve_buffers() in effect */
+ 
+ 	/* add more here as needed */
++  //--------------------ADDED------------
++
++  struct thread *threadC;
++  struct thread *threadP;
++  struct lock *lockT;
++  struct wchan *wchanT;
++  struct cv *cvT;
+ };
+ 
++
++
+ /*
+  * Array of threads.
+  */
+@@ -147,6 +156,8 @@ int thread_fork(const char *name, struct proc *proc,
+                 void (*func)(void *, unsigned long),
+                 void *data1, unsigned long data2);
+ 
++void thread_join(void);
++
+ /*
+  * Cause the current thread to exit.
+  * Interrupts need not be disabled.
+diff --git a/kern/main/menu.c b/kern/main/menu.c
+index 33522bb..e369be3 100644
+--- a/kern/main/menu.c
++++ b/kern/main/menu.c
+@@ -486,6 +486,7 @@ static const char *testmenu[] = {
+ 	"[tt1] Thread test 1                 ",
+ 	"[tt2] Thread test 2                 ",
+ 	"[tt3] Thread test 3                 ",
++	"[tt4] Thread test 4                 ",
+ #if OPT_NET
+ 	"[net] Network test                  ",
+ #endif
+@@ -595,6 +596,7 @@ static struct {
+ 	{ "tt1",	threadtest },
+ 	{ "tt2",	threadtest2 },
+ 	{ "tt3",	threadtest3 },
++	{ "tt4",	threadtest4 },
+ 	{ "sy1",	semtest },
+ 
+ 	/* synchronization assignment tests */
+diff --git a/kern/test/threadtest.c b/kern/test/threadtest.c
+index be9f282..34fd6f6 100644
+--- a/kern/test/threadtest.c
++++ b/kern/test/threadtest.c
+@@ -39,6 +39,9 @@
+ #define NTHREADS  8
+ 
+ static struct semaphore *tsem = NULL;
++static struct cv *cvT = NULL;
++static struct lock *lockT = NULL;
++
+ 
+ static
+ void
+@@ -52,6 +55,53 @@ init_sem(void)
+ 	}
+ }
+ 
++static
++void
++init_lock(void)
++{
++	if (lockT==NULL) {
++		lockT = lock_create("lockT");
++		if (lockT == NULL) {
++			panic("threadtest: lock_create failed\n");
++		}
++	}
++}
++
++
++
++static
++void
++init_cv(void)
++{
++	if (cvT==NULL) {
++		cvT = cv_create("cvT");
++		if (cvT == NULL) {
++			panic("threadtest: cvT_create failed\n");
++		}
++	}
++}
++
++static
++void
++testing(void *junk, unsigned long num)
++{
++	int ch = num;
++	int i;
++
++	(void)junk;
++
++	kprintf("\nT");
++	kprintf("\nE");
++	kprintf("\nS");
++	kprintf("\nT");
++	kprintf("\nI");
++	kprintf("\nN");
++	kprintf("\nG");
++
++	i +=1;
++	V(tsem);
++}
++
+ static
+ void
+ loudthread(void *junk, unsigned long num)
+@@ -144,3 +194,32 @@ threadtest2(int nargs, char **args)
+ 
+ 	return 0;
+ }
++
++int
++threadtest4(int nargs, char **args)
++{
++  (void)nargs;
++  (void)args;
++  init_cv();
++  init_lock();
++
++  kprintf("Starting thread test 4...\n");
++
++  char name[16];
++  int i = 0, result;
++
++	//	for (i=0; i<NTHREADS; i++) {
++  snprintf(name, sizeof(name), "threadtest%d", i);
++  result = thread_fork(name, NULL, testing, NULL, i);
++  if (result) {
++    panic("threadtest: thread_fork failed %s)\n",
++	  strerror(result));
++  }
++		//	}
++  P(tsem);
++
++  thread_join();
++  kprintf("\nThread test 4 done.\n");
++  
++  return 0;
++}
+diff --git a/kern/thread/synch.c b/kern/thread/synch.c
+index d083f4b..4d1ca55 100644
+--- a/kern/thread/synch.c
++++ b/kern/thread/synch.c
+@@ -156,6 +156,18 @@ lock_create(const char *name)
+ 
+         // add stuff here as needed
+ 
++	//------------------------ADDED---------
++	lock->wchanL = wchan_create(lock->lk_name);
++	if(lock->wchanL == NULL){
++	  kfree(lock->lk_name);
++	  kfree(lock);
++	}
++
++	spinlock_init(&lock->spinL);
++	lock->threadL = NULL;
++	lock->boolL = false;
++	//-----------------------------------
++
+         return lock;
+ }
+ 
+@@ -165,6 +177,10 @@ lock_destroy(struct lock *lock)
+         KASSERT(lock != NULL);
+ 
+         // add stuff here as needed
++	//-----------------------ADDED-----------------
++	spinlock_cleanup(&lock->spinL);
++	wchan_destroy(lock->wchanL);
++	//-----------------------------------------
+ 
+         kfree(lock->lk_name);
+         kfree(lock);
+@@ -174,6 +190,27 @@ void
+ lock_acquire(struct lock *lock)
+ {
+         // Write this
++  //----------------ADDED-------------------
++  KASSERT(lock!= NULL);
++  KASSERT(curthread->t_in_interrupt == false);
++
++  spinlock_acquire(&lock->spinL);
++
++  while(&lock->boolL){
++    whcan_sleep(lock->wchanL, &lock->spinL);
++  }
++
++  KASSERT(!lock->boolL);
++  lock->boolL = true;
++
++  lock->threadL = curthread;
++
++  KASSERT(lock->boolL);
++  KASSERT(lock->threadL == curthread);
++
++  spinlock_release(&lock->spinL);
++  
++  //-------------------------------------------------
+ 
+         (void)lock;  // suppress warning until code gets written
+ }
+@@ -182,18 +219,33 @@ void
+ lock_release(struct lock *lock)
+ {
+         // Write this
++  KASSERT(lock != NULL);
++  spinlock_acquire(&lock->spinL);
+ 
+-        (void)lock;  // suppress warning until code gets written
++  KASSERT(lock->boolL);
++
++  lock->boolL = false;
++  lock->threadL = NULL;
++
++  wchan_wakeone(lock->wchanL, &lock->spinL);
++  spinlock_release(&lock->spinL);
++
++    // (void)lock;  // suppress warning until code gets written
+ }
+ 
+ bool
+ lock_do_i_hold(struct lock *lock)
+ {
+         // Write this
++  if(lock->threadL == curthread)
++    return true;
+ 
+-        (void)lock;  // suppress warning until code gets written
++  return false;
++
++  
++        //(void)lock;  // suppress warning until code gets written
+ 
+-        return true; // dummy until code gets written
++        //return true; // dummy until code gets written
+ }
+ 
+ ////////////////////////////////////////////////////////////
+@@ -219,6 +271,17 @@ cv_create(const char *name)
+ 
+         // add stuff here as needed
+ 
++	//----------------------ADDED---------------------
++	cv->wchanCV = wchan_create(cv->cv_name);
++	if(cv->wchanCV == NULL){
++	  kfree(cv->cv_name);
++	  kfree(cv);
++	  return NULL;
++	}
++
++	spinlock_init(&cv->spinCV);
++	//-----------------------------------------------
++
+         return cv;
+ }
+ 
+@@ -228,6 +291,10 @@ cv_destroy(struct cv *cv)
+         KASSERT(cv != NULL);
+ 
+         // add stuff here as needed
++	//------------ADDED--------------------------
++	spinlcok_cleanup(&cv->spinCV);
++	wchan_destroy(cv->wchanCV);
++	//-----------------------------------------
+ 
+         kfree(cv->cv_name);
+         kfree(cv);
+@@ -237,22 +304,63 @@ void
+ cv_wait(struct cv *cv, struct lock *lock)
+ {
+         // Write this
+-        (void)cv;    // suppress warning until code gets written
+-        (void)lock;  // suppress warning until code gets written
++
++  //---------------------ADDED------------------
++  KASSERT(cv != NULL);
++  KASSERT(lock!= NULL);
++
++  if(lock_do_i_hold(lock)){
++    spinlock_aquire(&cv->spinCV);
++    lock_release(lock);
++
++    wchan_sleep(cv->wchanCV, &cv->spinCV);
++    spinlock_release(&cv->spinCV);
++    lock_aquire(lock);
++  }
++  
++  //------------------------------------------
++  
++        //(void)cv;    // suppress warning until code gets written
++  // (void)lock;  // suppress warning until code gets written
+ }
+ 
+ void
+ cv_signal(struct cv *cv, struct lock *lock)
+ {
+         // Write this
+-	(void)cv;    // suppress warning until code gets written
+-	(void)lock;  // suppress warning until code gets written
++  //-------------ADDED ---------------------
++  KASSERT(cv != NULL);
++  KASSERT(lock != NULL);
++
++  spinlock_acquire(&cv->spinCV);
++
++  if(lock_do_i_hold(lock)){
++    wchan_wakeone(cv->wchanCV, &cv->spinCV);
++  }
++
++  spinlock_release(&cv->spinCV);
++  //-------------------------------------------
++  
++  //	(void)cv;    // suppress warning until code gets written
++  //	(void)lock;  // suppress warning until code gets written
+ }
+ 
+ void
+ cv_broadcast(struct cv *cv, struct lock *lock)
+ {
+ 	// Write this
+-	(void)cv;    // suppress warning until code gets written
+-	(void)lock;  // suppress warning until code gets written
++  //-------------------ADDED--------------------------
++ KASSERT(cv != NULL);
++  KASSERT(lock != NULL);
++
++  spinlock_acquire(&cv->spinCV);
++
++  if(lock_do_i_hold(lock)){
++    wchan_wakeall(cv->wchanCV, &cv->spinCV);
++  }
++
++  spinlock_release(&cv->spinCV);
++  //--------------------------------------------
++  //	(void)cv;    // suppress warning until code gets written
++  //	(void)lock;  // suppress warning until code gets written
+ }
+diff --git a/kern/thread/thread.c b/kern/thread/thread.c
+index 8ac3b9d..871782b 100644
+--- a/kern/thread/thread.c
++++ b/kern/thread/thread.c
+@@ -150,6 +150,13 @@ thread_create(const char *name)
+ 	thread->t_did_reserve_buffers = false;
+ 
+ 	/* If you add to struct thread, be sure to initialize here */
++	thread->threadC = NULL;
++	thread->threadP = NULL;
++
++	thread->lockT = NULL;
++	thread->cvT = NULL;
++	thread->wchan = NULL:
++	
+ 
+ 	return thread;
+ }
+@@ -544,6 +551,16 @@ thread_fork(const char *name,
+ 	/* Set up the switchframe so entrypoint() gets called */
+ 	switchframe_init(newthread, entrypoint, data1, data2);
+ 
++	//----------------------------ADDED--------------------
++	curthread->threadC = newthread;
++	newthread->threadP = curthread;
++
++	curthread->lockT = lock_create(name);
++	curthread->wchanT = wchan_create(name);
++	curthread->cv = cv_create(name);
++	//-----------------------------------------------------
++	
++
+ 	/* Lock the current cpu's run queue and make the new thread runnable */
+ 	thread_make_runnable(newthread, false);
+ 
+@@ -798,6 +815,14 @@ thread_exit(void)
+ 
+ 	/* Check the stack guard band. */
+ 	thread_checkstack(cur);
++	//--------------------ADDED---------------------
++	if(cur->threadP != NULL){
++	  lock_acquire(cur->threadP->lockT);
++	  cur->threadP->threadC = NULL;
++	  cv_signal(cur->threadP->cvT, cur->threadP->lockT);
++	  lock_release(cur->threadP->lockT);
++	}
++	//-------------------------------------------------
+ 
+ 	/* Interrupts off on this processor */
+         splhigh();
+@@ -814,6 +839,21 @@ thread_yield(void)
+ 	thread_switch(S_READY, NULL, NULL);
+ }
+ 
++//---------------------ADDED------------------------
++void
++thread_join(void)
++{
++  lock_acquire(curthread->lockT);
++
++  while(curthread->threadC != NULL)
++    cv_wait(curthread->cvT, curthread->lockT);
++
++  lock_release(curthread->lockT);
++
++  //return 0;
++}
++//----------------------------------------------
++
+ ////////////////////////////////////////////////////////////
+ 
+ /*
+diff --git a/proj02-rde16.txt b/proj02-rde16.txt
+new file mode 100644
+index 0000000..bb92e54
+--- /dev/null
++++ b/proj02-rde16.txt
+@@ -0,0 +1,473 @@
++diff --git a/defs.mk b/defs.mk
++index 9932652..8b26384 100644
++--- a/defs.mk
+++++ b/defs.mk
++@@ -13,7 +13,7 @@
++ # The things that can be set here are documented in mk/os161.config.mk.
++ #
++ 
++-OSTREE=/home/ubuntu/cs161/root
+++OSTREE=/home/romario/os161/root
++ PLATFORM=sys161
++ MACHINE=mips
++ COMPAT_CFLAGS= -DNEED_NTOHLL
++diff --git a/kern/include/synch.h b/kern/include/synch.h
++index fee3b07..ed1883d 100644
++--- a/kern/include/synch.h
+++++ b/kern/include/synch.h
++@@ -73,7 +73,12 @@ void V(struct semaphore *);
++  * (should be) made internally.
++  */
++ struct lock {
+++  //recitation: flag, wait c, spin l, thread pointer?
++         char *lk_name;
+++  volatile struct thread *threadL;
+++  struct wchan *wchanL;
+++  struct spinlock spinL;
+++  volatile struct bool boolL;
++         // add what you need here
++         // (don't forget to mark things volatile as needed)
++ };
++@@ -113,6 +118,8 @@ bool lock_do_i_hold(struct lock *);
++ 
++ struct cv {
++         char *cv_name;
+++  struct wchan *wchanCV;
+++  struct spinlock spinCV;
++         // add what you need here
++         // (don't forget to mark things volatile as needed)
++ };
++diff --git a/kern/include/test.h b/kern/include/test.h
++index ad3552f..3fa904c 100644
++--- a/kern/include/test.h
+++++ b/kern/include/test.h
++@@ -54,6 +54,7 @@ int threadlisttest(int, char **);
++ int threadtest(int, char **);
++ int threadtest2(int, char **);
++ int threadtest3(int, char **);
+++int threadtest4(int, char **);
++ int semtest(int, char **);
++ int locktest(int, char **);
++ int cvtest(int, char **);
++diff --git a/kern/include/thread.h b/kern/include/thread.h
++index d161c8f..d3280e6 100644
++--- a/kern/include/thread.h
+++++ b/kern/include/thread.h
++@@ -109,8 +109,17 @@ struct thread {
++ 	bool t_did_reserve_buffers;	/* reserve_buffers() in effect */
++ 
++ 	/* add more here as needed */
+++  //--------------------ADDED------------
+++
+++  struct thread *threadC;
+++  struct thread *threadP;
+++  struct lock *lockT;
+++  struct wchan *wchanT;
+++  struct cv *cvT;
++ };
++ 
+++
+++
++ /*
++  * Array of threads.
++  */
++@@ -147,6 +156,8 @@ int thread_fork(const char *name, struct proc *proc,
++                 void (*func)(void *, unsigned long),
++                 void *data1, unsigned long data2);
++ 
+++void thread_join(void);
+++
++ /*
++  * Cause the current thread to exit.
++  * Interrupts need not be disabled.
++diff --git a/kern/main/menu.c b/kern/main/menu.c
++index 33522bb..e369be3 100644
++--- a/kern/main/menu.c
+++++ b/kern/main/menu.c
++@@ -486,6 +486,7 @@ static const char *testmenu[] = {
++ 	"[tt1] Thread test 1                 ",
++ 	"[tt2] Thread test 2                 ",
++ 	"[tt3] Thread test 3                 ",
+++	"[tt4] Thread test 4                 ",
++ #if OPT_NET
++ 	"[net] Network test                  ",
++ #endif
++@@ -595,6 +596,7 @@ static struct {
++ 	{ "tt1",	threadtest },
++ 	{ "tt2",	threadtest2 },
++ 	{ "tt3",	threadtest3 },
+++	{ "tt4",	threadtest4 },
++ 	{ "sy1",	semtest },
++ 
++ 	/* synchronization assignment tests */
++diff --git a/kern/test/threadtest.c b/kern/test/threadtest.c
++index be9f282..34fd6f6 100644
++--- a/kern/test/threadtest.c
+++++ b/kern/test/threadtest.c
++@@ -39,6 +39,9 @@
++ #define NTHREADS  8
++ 
++ static struct semaphore *tsem = NULL;
+++static struct cv *cvT = NULL;
+++static struct lock *lockT = NULL;
+++
++ 
++ static
++ void
++@@ -54,6 +57,53 @@ init_sem(void)
++ 
++ static
++ void
+++init_lock(void)
+++{
+++	if (lockT==NULL) {
+++		lockT = lock_create("lockT");
+++		if (lockT == NULL) {
+++			panic("threadtest: lock_create failed\n");
+++		}
+++	}
+++}
+++
+++
+++
+++static
+++void
+++init_cv(void)
+++{
+++	if (cvT==NULL) {
+++		cvT = cv_create("cvT");
+++		if (cvT == NULL) {
+++			panic("threadtest: cvT_create failed\n");
+++		}
+++	}
+++}
+++
+++static
+++void
+++testing(void *junk, unsigned long num)
+++{
+++	int ch = num;
+++	int i;
+++
+++	(void)junk;
+++
+++	kprintf("\nT");
+++	kprintf("\nE");
+++	kprintf("\nS");
+++	kprintf("\nT");
+++	kprintf("\nI");
+++	kprintf("\nN");
+++	kprintf("\nG");
+++
+++	i +=1;
+++	V(tsem);
+++}
+++
+++static
+++void
++ loudthread(void *junk, unsigned long num)
++ {
++ 	int ch = '0' + num;
++@@ -144,3 +194,32 @@ threadtest2(int nargs, char **args)
++ 
++ 	return 0;
++ }
+++
+++int
+++threadtest4(int nargs, char **args)
+++{
+++  (void)nargs;
+++  (void)args;
+++  init_cv();
+++  init_lock();
+++
+++  kprintf("Starting thread test 4...\n");
+++
+++  char name[16];
+++  int i = 0, result;
+++
+++	//	for (i=0; i<NTHREADS; i++) {
+++  snprintf(name, sizeof(name), "threadtest%d", i);
+++  result = thread_fork(name, NULL, testing, NULL, i);
+++  if (result) {
+++    panic("threadtest: thread_fork failed %s)\n",
+++	  strerror(result));
+++  }
+++		//	}
+++  P(tsem);
+++
+++  thread_join();
+++  kprintf("\nThread test 4 done.\n");
+++  
+++  return 0;
+++}
++diff --git a/kern/thread/synch.c b/kern/thread/synch.c
++index d083f4b..4d1ca55 100644
++--- a/kern/thread/synch.c
+++++ b/kern/thread/synch.c
++@@ -156,6 +156,18 @@ lock_create(const char *name)
++ 
++         // add stuff here as needed
++ 
+++	//------------------------ADDED---------
+++	lock->wchanL = wchan_create(lock->lk_name);
+++	if(lock->wchanL == NULL){
+++	  kfree(lock->lk_name);
+++	  kfree(lock);
+++	}
+++
+++	spinlock_init(&lock->spinL);
+++	lock->threadL = NULL;
+++	lock->boolL = false;
+++	//-----------------------------------
+++
++         return lock;
++ }
++ 
++@@ -165,6 +177,10 @@ lock_destroy(struct lock *lock)
++         KASSERT(lock != NULL);
++ 
++         // add stuff here as needed
+++	//-----------------------ADDED-----------------
+++	spinlock_cleanup(&lock->spinL);
+++	wchan_destroy(lock->wchanL);
+++	//-----------------------------------------
++ 
++         kfree(lock->lk_name);
++         kfree(lock);
++@@ -174,6 +190,27 @@ void
++ lock_acquire(struct lock *lock)
++ {
++         // Write this
+++  //----------------ADDED-------------------
+++  KASSERT(lock!= NULL);
+++  KASSERT(curthread->t_in_interrupt == false);
+++
+++  spinlock_acquire(&lock->spinL);
+++
+++  while(&lock->boolL){
+++    whcan_sleep(lock->wchanL, &lock->spinL);
+++  }
+++
+++  KASSERT(!lock->boolL);
+++  lock->boolL = true;
+++
+++  lock->threadL = curthread;
+++
+++  KASSERT(lock->boolL);
+++  KASSERT(lock->threadL == curthread);
+++
+++  spinlock_release(&lock->spinL);
+++  
+++  //-------------------------------------------------
++ 
++         (void)lock;  // suppress warning until code gets written
++ }
++@@ -182,18 +219,33 @@ void
++ lock_release(struct lock *lock)
++ {
++         // Write this
+++  KASSERT(lock != NULL);
+++  spinlock_acquire(&lock->spinL);
++ 
++-        (void)lock;  // suppress warning until code gets written
+++  KASSERT(lock->boolL);
+++
+++  lock->boolL = false;
+++  lock->threadL = NULL;
+++
+++  wchan_wakeone(lock->wchanL, &lock->spinL);
+++  spinlock_release(&lock->spinL);
+++
+++    // (void)lock;  // suppress warning until code gets written
++ }
++ 
++ bool
++ lock_do_i_hold(struct lock *lock)
++ {
++         // Write this
+++  if(lock->threadL == curthread)
+++    return true;
++ 
++-        (void)lock;  // suppress warning until code gets written
+++  return false;
+++
+++  
+++        //(void)lock;  // suppress warning until code gets written
++ 
++-        return true; // dummy until code gets written
+++        //return true; // dummy until code gets written
++ }
++ 
++ ////////////////////////////////////////////////////////////
++@@ -219,6 +271,17 @@ cv_create(const char *name)
++ 
++         // add stuff here as needed
++ 
+++	//----------------------ADDED---------------------
+++	cv->wchanCV = wchan_create(cv->cv_name);
+++	if(cv->wchanCV == NULL){
+++	  kfree(cv->cv_name);
+++	  kfree(cv);
+++	  return NULL;
+++	}
+++
+++	spinlock_init(&cv->spinCV);
+++	//-----------------------------------------------
+++
++         return cv;
++ }
++ 
++@@ -228,6 +291,10 @@ cv_destroy(struct cv *cv)
++         KASSERT(cv != NULL);
++ 
++         // add stuff here as needed
+++	//------------ADDED--------------------------
+++	spinlcok_cleanup(&cv->spinCV);
+++	wchan_destroy(cv->wchanCV);
+++	//-----------------------------------------
++ 
++         kfree(cv->cv_name);
++         kfree(cv);
++@@ -237,22 +304,63 @@ void
++ cv_wait(struct cv *cv, struct lock *lock)
++ {
++         // Write this
++-        (void)cv;    // suppress warning until code gets written
++-        (void)lock;  // suppress warning until code gets written
+++
+++  //---------------------ADDED------------------
+++  KASSERT(cv != NULL);
+++  KASSERT(lock!= NULL);
+++
+++  if(lock_do_i_hold(lock)){
+++    spinlock_aquire(&cv->spinCV);
+++    lock_release(lock);
+++
+++    wchan_sleep(cv->wchanCV, &cv->spinCV);
+++    spinlock_release(&cv->spinCV);
+++    lock_aquire(lock);
+++  }
+++  
+++  //------------------------------------------
+++  
+++        //(void)cv;    // suppress warning until code gets written
+++  // (void)lock;  // suppress warning until code gets written
++ }
++ 
++ void
++ cv_signal(struct cv *cv, struct lock *lock)
++ {
++         // Write this
++-	(void)cv;    // suppress warning until code gets written
++-	(void)lock;  // suppress warning until code gets written
+++  //-------------ADDED ---------------------
+++  KASSERT(cv != NULL);
+++  KASSERT(lock != NULL);
+++
+++  spinlock_acquire(&cv->spinCV);
+++
+++  if(lock_do_i_hold(lock)){
+++    wchan_wakeone(cv->wchanCV, &cv->spinCV);
+++  }
+++
+++  spinlock_release(&cv->spinCV);
+++  //-------------------------------------------
+++  
+++  //	(void)cv;    // suppress warning until code gets written
+++  //	(void)lock;  // suppress warning until code gets written
++ }
++ 
++ void
++ cv_broadcast(struct cv *cv, struct lock *lock)
++ {
++ 	// Write this
++-	(void)cv;    // suppress warning until code gets written
++-	(void)lock;  // suppress warning until code gets written
+++  //-------------------ADDED--------------------------
+++ KASSERT(cv != NULL);
+++  KASSERT(lock != NULL);
+++
+++  spinlock_acquire(&cv->spinCV);
+++
+++  if(lock_do_i_hold(lock)){
+++    wchan_wakeall(cv->wchanCV, &cv->spinCV);
+++  }
+++
+++  spinlock_release(&cv->spinCV);
+++  //--------------------------------------------
+++  //	(void)cv;    // suppress warning until code gets written
+++  //	(void)lock;  // suppress warning until code gets written
++ }
++diff --git a/kern/thread/thread.c b/kern/thread/thread.c
++index 8ac3b9d..871782b 100644
++--- a/kern/thread/thread.c
+++++ b/kern/thread/thread.c
++@@ -150,6 +150,13 @@ thread_create(const char *name)
++ 	thread->t_did_reserve_buffers = false;
++ 
++ 	/* If you add to struct thread, be sure to initialize here */
+++	thread->threadC = NULL;
+++	thread->threadP = NULL;
+++
+++	thread->lockT = NULL;
+++	thread->cvT = NULL;
+++	thread->wchan = NULL:
+++	
++ 
++ 	return thread;
++ }
++@@ -544,6 +551,16 @@ thread_fork(const char *name,
++ 	/* Set up the switchframe so entrypoint() gets called */
++ 	switchframe_init(newthread, entrypoint, data1, data2);
++ 
+++	//----------------------------ADDED--------------------
+++	curthread->threadC = newthread;
+++	newthread->threadP = curthread;
+++
+++	curthread->lockT = lock_create(name);
+++	curthread->wchanT = wchan_create(name);
+++	curthread->cv = cv_create(name);
+++	//-----------------------------------------------------
+++	
+++
++ 	/* Lock the current cpu's run queue and make the new thread runnable */
++ 	thread_make_runnable(newthread, false);
++ 
++@@ -798,6 +815,14 @@ thread_exit(void)
++ 
++ 	/* Check the stack guard band. */
++ 	thread_checkstack(cur);
+++	//--------------------ADDED---------------------
+++	if(cur->threadP != NULL){
+++	  lock_acquire(cur->threadP->lockT);
+++	  cur->threadP->threadC = NULL;
+++	  cv_signal(cur->threadP->cvT, cur->threadP->lockT);
+++	  lock_release(cur->threadP->lockT);
+++	}
+++	//-------------------------------------------------
++ 
++ 	/* Interrupts off on this processor */
++         splhigh();
++@@ -814,6 +839,21 @@ thread_yield(void)
++ 	thread_switch(S_READY, NULL, NULL);
++ }
++ 
+++//---------------------ADDED------------------------
+++void
+++thread_join(void)
+++{
+++  lock_acquire(curthread->lockT);
+++
+++  while(curthread->threadC != NULL)
+++    cv_wait(curthread->cvT, curthread->lockT);
+++
+++  lock_release(curthread->lockT);
+++
+++  //return 0;
+++}
+++//----------------------------------------------
+++
++ ////////////////////////////////////////////////////////////
++ 
++ /*
